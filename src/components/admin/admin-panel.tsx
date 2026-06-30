@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { PHASE_INFO, PHASE_ORDER, ALL_TEAMS } from '@/lib/data/matches'
 import { Flag } from '@/components/ui/flag'
-import type { PoolMember, PoolSpainSquadPlayer, Match, PoolMatchTeams } from '@/types'
+import type { PoolMember, PoolSpainSquadPlayer, Match, PoolMatchTeams, Result } from '@/types'
 
 interface OpenPhase { id: string; pool_id: string; phase: string; is_open: boolean }
 
@@ -16,10 +16,11 @@ interface AdminPanelProps {
   squad: PoolSpainSquadPlayer[]
   matches: Match[]
   matchTeams: PoolMatchTeams[]
+  results: Result[]
   currentUserId: string
 }
 
-type Tab = 'members' | 'rounds' | 'teams' | 'squad'
+type Tab = 'members' | 'rounds' | 'teams' | 'results' | 'squad'
 
 export function AdminPanel({
   poolId,
@@ -28,6 +29,7 @@ export function AdminPanel({
   squad: initialSquad,
   matches,
   matchTeams: initialMatchTeams,
+  results: initialResults,
   currentUserId,
 }: AdminPanelProps) {
   const supabase = createClient()
@@ -36,6 +38,7 @@ export function AdminPanel({
   const [openPhases, setOpenPhases] = useState(initialPhases)
   const [squad, setSquad] = useState(initialSquad)
   const [matchTeams, setMatchTeams] = useState(initialMatchTeams)
+  const [results, setResults] = useState(initialResults)
   const [newPlayer, setNewPlayer] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
 
@@ -101,6 +104,26 @@ export function AdminPanel({
     setSquad(prev => prev.filter(p => p.id !== id))
   }
 
+  const handleSetResult = async (matchId: string, side: 'home_score' | 'away_score', value: string) => {
+    const num = Math.min(30, Math.max(0, parseInt(value) || 0))
+    const existing = results.find(r => r.match_id === matchId)
+    const homeScore = side === 'home_score' ? num : (existing?.home_score ?? 0)
+    const awayScore = side === 'away_score' ? num : (existing?.away_score ?? 0)
+    const updated = existing
+      ? { ...existing, home_score: homeScore, away_score: awayScore }
+      : { match_id: matchId, pool_id: poolId, home_score: homeScore, away_score: awayScore, source: 'manual' as const }
+
+    setResults(prev => [...prev.filter(r => r.match_id !== matchId), updated as Result])
+
+    await supabase.from('results').upsert({
+      pool_id: poolId,
+      match_id: matchId,
+      home_score: homeScore,
+      away_score: awayScore,
+      source: 'manual',
+    }, { onConflict: 'pool_id,match_id' })
+  }
+
   const handleSetMatchTeam = async (matchId: string, side: 'real_home' | 'real_away', value: string) => {
     const existing = matchTeams.find(mt => mt.match_id === matchId)
     const updated = existing
@@ -129,6 +152,7 @@ export function AdminPanel({
           ['members', `👥 Miembros${pending.length > 0 ? ` (${pending.length})` : ''}`],
           ['rounds', '⚡ Rondas'],
           ['teams', '🏟️ Equipos'],
+          ['results', '⚽ Resultados'],
           ['squad', '🇪🇸 Plantilla'],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
@@ -294,6 +318,74 @@ export function AdminPanel({
                               <span className="font-semibold">{teams.real_away}</span>
                               <span className="text-green-400 ml-1">✓</span>
                             </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      )}
+
+      {/* RESULTS TAB — manual entry for knockout results */}
+      {tab === 'results' && (
+        <div className="card">
+          <h2 className="font-bold text-sm uppercase tracking-wide mb-1">⚽ Resultados eliminatorias</h2>
+          <p className="text-xs text-muted mb-4">
+            Introduce los resultados al final de los 90' (o 120' si hay prórroga). <strong className="text-amber-300">No incluyas penaltis</strong> — solo el marcador real del partido.
+          </p>
+          {openKnockoutPhases.length === 0 ? (
+            <p className="text-muted text-sm">Abre alguna ronda eliminatoria desde ⚡ Rondas para poder introducir resultados.</p>
+          ) : (
+            openKnockoutPhases.map(ph => {
+              const phMatches = ph === 'semis'
+                ? matches.filter(m => m.phase === 'semis' || m.phase === '3er')
+                : matches.filter(m => m.phase === ph)
+              return (
+                <div key={ph} className="mb-5">
+                  <div className="font-black text-sm tracking-wide text-gold mb-2">{PHASE_INFO[ph]?.full}</div>
+                  <div className="space-y-2">
+                    {phMatches.map(m => {
+                      const teams = matchTeams.find(mt => mt.match_id === m.id)
+                      const result = results.find(r => r.match_id === m.id)
+                      const displayHome = teams?.real_home || m.home
+                      const displayAway = teams?.real_away || m.away
+                      return (
+                        <div key={m.id} className="bg-surface-2 border border-border rounded-lg p-3">
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                            <div className="flex items-center gap-1.5 text-sm font-semibold overflow-hidden">
+                              <Flag team={displayHome} size="sm" />
+                              <span className="truncate">{displayHome}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number" min={0} max={30}
+                                defaultValue={result?.home_score ?? ''}
+                                placeholder="–"
+                                onBlur={(e) => handleSetResult(m.id, 'home_score', e.target.value)}
+                                className="w-10 h-10 text-center rounded-lg font-black text-lg outline-none bg-surface border border-border text-cream focus:border-gold"
+                              />
+                              <span className="text-muted font-bold">:</span>
+                              <input
+                                type="number" min={0} max={30}
+                                defaultValue={result?.away_score ?? ''}
+                                placeholder="–"
+                                onBlur={(e) => handleSetResult(m.id, 'away_score', e.target.value)}
+                                className="w-10 h-10 text-center rounded-lg font-black text-lg outline-none bg-surface border border-border text-cream focus:border-gold"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 text-sm font-semibold overflow-hidden flex-row-reverse">
+                              <Flag team={displayAway} size="sm" />
+                              <span className="truncate text-right">{displayAway}</span>
+                            </div>
+                          </div>
+                          {result && (
+                            <p className="text-center text-[10px] text-green-400 mt-1.5">
+                              ✓ Guardado: {result.home_score}–{result.away_score}
+                            </p>
                           )}
                         </div>
                       )

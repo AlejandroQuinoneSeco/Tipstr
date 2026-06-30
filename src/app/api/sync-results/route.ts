@@ -69,27 +69,13 @@ export async function GET(request: Request) {
     }
 
     const groupMatches = matches.filter(m => m.phase === 'grupos')
-    const knockoutMatches = matches.filter(m => m.phase !== 'grupos')
+    // Knockout results are entered manually by pool admins to avoid
+    // penalty shootout scores being recorded (API returns penalties as final score)
 
     let matchedFixtures = 0
     let upserts = 0
     const errors: string[] = []
     const unmatched: { rawHome: string; rawAway: string; mappedHome: string; mappedAway: string }[] = []
-
-    // Pre-fetch all knockout team assignments across all pools, grouped by pool
-    const { data: allMatchTeams, error: matchTeamsError } = await supabase
-      .from('pool_match_teams')
-      .select('pool_id, match_id, real_home, real_away')
-
-    if (matchTeamsError) {
-      console.error('Error fetching pool_match_teams:', matchTeamsError)
-    }
-
-    const matchTeamsByPool = new Map<string, typeof allMatchTeams>()
-    for (const mt of allMatchTeams ?? []) {
-      if (!matchTeamsByPool.has(mt.pool_id)) matchTeamsByPool.set(mt.pool_id, [])
-      matchTeamsByPool.get(mt.pool_id)!.push(mt)
-    }
 
     for (const apiMatch of data.matches ?? []) {
       const rawHome = apiMatch.homeTeam?.name ?? ''
@@ -102,61 +88,30 @@ export async function GET(request: Request) {
         continue
       }
 
-      // ── Try direct match (works for group stage, where home/away are fixed) ──
+      // Only sync group stage matches — knockout results entered manually by admin
       const directMatch = groupMatches.find(m =>
         (m.home === home && m.away === away) || (m.home === away && m.away === home)
       )
 
-      if (directMatch) {
-        matchedFixtures++
-        const isFlipped = directMatch.home === away
-
-        const rows = pools.map(p => ({
-          pool_id: p.id,
-          match_id: directMatch.id,
-          home_score: isFlipped ? score.away : score.home,
-          away_score: isFlipped ? score.home : score.away,
-          source: 'api' as const,
-        }))
-
-        const { error } = await supabase.from('results').upsert(rows, { onConflict: 'pool_id,match_id' })
-        if (error) errors.push(`${home} vs ${away}: ${error.message}`)
-        else upserts += rows.length
-
+      if (!directMatch) {
+        unmatched.push({ rawHome, rawAway, mappedHome: home, mappedAway: away })
         continue
       }
 
-      // ── Try knockout match: compare against each pool's real team assignment ──
-      let foundInAnyPool = false
+      matchedFixtures++
+      const isFlipped = directMatch.home === away
 
-      for (const pool of pools) {
-        const poolTeams = matchTeamsByPool.get(pool.id) ?? []
-        const teamMatch = poolTeams.find(mt =>
-          (mt.real_home === home && mt.real_away === away) ||
-          (mt.real_home === away && mt.real_away === home)
-        )
-        if (!teamMatch) continue
+      const rows = pools.map(p => ({
+        pool_id: p.id,
+        match_id: directMatch.id,
+        home_score: isFlipped ? score.away : score.home,
+        away_score: isFlipped ? score.home : score.away,
+        source: 'api' as const,
+      }))
 
-        foundInAnyPool = true
-        const isFlipped = teamMatch.real_home === away
-
-        const { error } = await supabase.from('results').upsert({
-          pool_id: pool.id,
-          match_id: teamMatch.match_id,
-          home_score: isFlipped ? score.away : score.home,
-          away_score: isFlipped ? score.home : score.away,
-          source: 'api',
-        }, { onConflict: 'pool_id,match_id' })
-
-        if (error) errors.push(`[knockout ${pool.id}] ${home} vs ${away}: ${error.message}`)
-        else upserts++
-      }
-
-      if (foundInAnyPool) {
-        matchedFixtures++
-      } else {
-        unmatched.push({ rawHome, rawAway, mappedHome: home, mappedAway: away })
-      }
+      const { error } = await supabase.from('results').upsert(rows, { onConflict: 'pool_id,match_id' })
+      if (error) errors.push(`${home} vs ${away}: ${error.message}`)
+      else upserts += rows.length
     }
 
     return NextResponse.json({
