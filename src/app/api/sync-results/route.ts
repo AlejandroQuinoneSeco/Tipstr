@@ -77,10 +77,13 @@ export async function GET(request: Request) {
     const unmatched: { rawHome: string; rawAway: string; mappedHome: string; mappedAway: string }[] = []
 
     // Pre-fetch all knockout team assignments across all pools, grouped by pool
-    const { data: allMatchTeams } = await supabase
+    const { data: allMatchTeams, error: matchTeamsError } = await supabase
       .from('pool_match_teams')
       .select('pool_id, match_id, real_home, real_away')
-      .in('match_id', knockoutMatches.map(m => m.id))
+
+    if (matchTeamsError) {
+      console.error('Error fetching pool_match_teams:', matchTeamsError)
+    }
 
     const matchTeamsByPool = new Map<string, typeof allMatchTeams>()
     for (const mt of allMatchTeams ?? []) {
@@ -164,6 +167,10 @@ export async function GET(request: Request) {
       totalUpserts: upserts,
       unmatchedFixtures: unmatched.length > 0 ? unmatched : undefined,
       errors: errors.length > 0 ? errors : undefined,
+      debug: {
+        poolMatchTeamsCount: allMatchTeams?.length ?? 0,
+        matchTeamsByPoolKeys: Array.from(matchTeamsByPool.keys()),
+      },
     })
   } catch (error) {
     console.error('Sync error:', error)
