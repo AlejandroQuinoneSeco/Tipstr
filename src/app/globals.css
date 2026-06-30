@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: #060e08;
+    color: #ede8d5;
+    font-family: var(--font-inter), sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: #070d09; }
+  ::-webkit-scrollbar-thumb { background: #1b3820; border-radius: 2px; }
+
+  /* Remove number input arrows */
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-xl p-4;
+  }
+
+  .btn-primary {
+    @apply bg-gold text-background font-bold rounded-lg px-4 py-2.5 
+           hover:bg-gold-2 transition-colors duration-150 text-sm;
+  }
+
+  .btn-secondary {
+    @apply bg-transparent border border-border text-cream font-semibold rounded-lg 
+           px-4 py-2.5 hover:border-gold hover:text-gold transition-colors duration-150 text-sm;
+  }
+
+  .input {
+    @apply w-full bg-surface-2 border border-border rounded-lg px-3 py-2.5 
+           text-cream text-sm outline-none transition-colors duration-150
+           focus:border-gold placeholder:text-muted
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .badge {
+    @apply text-xs font-bold px-2 py-0.5 rounded-full inline-block;
+  }
+
+  .badge-admin {
+    @apply bg-red-900 text-red-300;
+  }
+
+  .badge-lock {
+    @apply bg-blue-900 text-blue-300;
+  }
+
+  .badge-pending {
+    @apply bg-amber-900 text-amber-300;
+  }
+}
