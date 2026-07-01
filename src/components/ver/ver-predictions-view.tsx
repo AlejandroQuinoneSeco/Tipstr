@@ -99,13 +99,16 @@ interface UserPredictionsCardProps {
   matchTeams: PoolMatchTeams[]
 }
 
-const PHASE_ORDER = ['grupos', '32avos', 'octavos', 'cuartos', 'semis', '3er', 'final']
+const PHASE_ORDER_DISPLAY = ['grupos', '32avos', 'octavos', 'cuartos', 'semis', '3er', 'final']
 
 function UserPredictionsCard({
   member, matches, results, predictions,
   awardResults, awardPredictions, spainResults, spainPredictions, matchTeams,
 }: UserPredictionsCardProps) {
   const [open, setOpen] = useState(false)
+  const [openPhase, setOpenPhase] = useState<string | null>(null)
+  const [openSection, setOpenSection] = useState<'spain' | 'awards' | null>(null)
+
   const isFullyLocked = member.locked_matches && member.locked_spain && member.locked_awards
 
   if (!isFullyLocked) {
@@ -143,15 +146,32 @@ function UserPredictionsCard({
 
   const total = matchTotal + awardTotal + spainTotal
 
-  // Group predicted matches by phase, in official phase order
+  // Build phases that have predictions
   const predictedMatchIds = new Set(predictions.map(p => p.match_id))
-  const matchesWithPreds = matches.filter(m => predictedMatchIds.has(m.id))
-  const phasesPresent = PHASE_ORDER.filter(ph =>
-    matchesWithPreds.some(m => ph === 'semis' ? (m.phase === 'semis' || m.phase === '3er') : m.phase === ph)
-  )
+  const phasesWithPreds = PHASE_ORDER_DISPLAY.filter(ph => {
+    const phMatches = ph === 'semis'
+      ? matches.filter(m => m.phase === 'semis' || m.phase === '3er')
+      : matches.filter(m => m.phase === ph)
+    return phMatches.some(m => predictedMatchIds.has(m.id))
+  })
+
+  // Points per phase
+  function phaseMatchPoints(ph: string) {
+    const phMatches = ph === 'semis'
+      ? matches.filter(m => m.phase === 'semis' || m.phase === '3er')
+      : matches.filter(m => m.phase === ph)
+    let pts = 0
+    phMatches.forEach(m => {
+      const pred = predictions.find(p => p.match_id === m.id)
+      const r = resultsMap.get(m.id)
+      if (pred && r) pts += scoreMatch(pred, r, m)
+    })
+    return pts
+  }
 
   return (
     <div className="card">
+      {/* Header — user + total */}
       <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-2">
         <span className="font-bold text-sm flex-1 text-left flex items-center gap-1.5">
           {member.username}
@@ -162,111 +182,144 @@ function UserPredictionsCard({
       </button>
 
       {open && (
-        <div className="mt-4 space-y-4">
-          {phasesPresent.map(phase => {
-            const phaseMatches = matchesWithPreds.filter(m =>
-              phase === 'semis' ? (m.phase === 'semis' || m.phase === '3er') : m.phase === phase
-            )
+        <div className="mt-3 space-y-1.5">
+          {/* Phase sections */}
+          {phasesWithPreds.map(ph => {
+            const phMatches = ph === 'semis'
+              ? matches.filter(m => m.phase === 'semis' || m.phase === '3er')
+              : matches.filter(m => m.phase === ph)
+            const phPreds = phMatches.filter(m => predictedMatchIds.has(m.id))
+            const phPts = phaseMatchPoints(ph)
+            const isOpenPhase = openPhase === ph
+
             return (
-              <div key={phase}>
-                <p className="text-[10px] font-bold text-muted uppercase tracking-wide mb-2">
-                  {PHASE_INFO[phase]?.full ?? phase}
-                </p>
-                <div className="space-y-1.5">
-                  {phaseMatches.map(m => {
-                    const pred = predictions.find(p => p.match_id === m.id)!
-                    const result = resultsMap.get(m.id)
-                    const pts = result ? scoreMatch(pred, result, m) : null
-                    const realTeams = matchTeamsMap.get(m.id)
-                    const displayHome = realTeams?.real_home || m.home
-                    const displayAway = realTeams?.real_away || m.away
+              <div key={ph} className="border border-border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setOpenPhase(isOpenPhase ? null : ph)}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 bg-surface-2 hover:bg-surface transition-colors"
+                >
+                  <span className="text-xs font-bold flex-1 text-left">
+                    {PHASE_INFO[ph]?.full ?? ph}
+                  </span>
+                  <span className="text-xs font-bold text-gold">{phPts}pts</span>
+                  <ChevronDown size={14} className={cn('text-muted transition-transform', isOpenPhase && 'rotate-180')} />
+                </button>
+
+                {isOpenPhase && (
+                  <div className="p-2 space-y-1.5">
+                    {phPreds.map(m => {
+                      const pred = predictions.find(p => p.match_id === m.id)!
+                      const result = resultsMap.get(m.id)
+                      const pts = result ? scoreMatch(pred, result, m) : null
+                      const realTeams = matchTeamsMap.get(m.id)
+                      const displayHome = realTeams?.real_home || m.home
+                      const displayAway = realTeams?.real_away || m.away
+                      return (
+                        <div key={m.id} className="bg-background border border-border rounded-lg px-2.5 py-2">
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <Flag team={displayHome} size="sm" />
+                              <span className="truncate">{displayHome}</span>
+                            </div>
+                            <div className="flex flex-col items-center gap-0.5 min-w-[70px]">
+                              {result && (
+                                <span className="font-black text-sm text-gold">{result.home_score}–{result.away_score}</span>
+                              )}
+                              <span className="font-bold text-muted">{pred.home_score}–{pred.away_score}</span>
+                              {pts !== null && (
+                                <span className={cn(
+                                  'text-[10px] font-bold px-1.5 rounded-full',
+                                  pts === m.pts_exact ? 'bg-green-900 text-green-300' : pts > 0 ? 'bg-amber-900 text-amber-300' : 'bg-red-900 text-red-300'
+                                )}>
+                                  {pts}pts
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-row-reverse">
+                              <Flag team={displayAway} size="sm" />
+                              <span className="truncate text-right">{displayAway}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Spain section */}
+          {spainPredictions.length > 0 && (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button
+                onClick={() => setOpenSection(openSection === 'spain' ? null : 'spain')}
+                className="w-full flex items-center gap-2 px-3 py-2.5 bg-surface-2 hover:bg-surface transition-colors"
+              >
+                <span className="text-xs font-bold flex-1 text-left">🇪🇸 España</span>
+                <span className="text-xs font-bold text-gold">{spainTotal}pts</span>
+                <ChevronDown size={14} className={cn('text-muted transition-transform', openSection === 'spain' && 'rotate-180')} />
+              </button>
+              {openSection === 'spain' && (
+                <div className="p-2 space-y-1">
+                  {spainPredictions.map(p => {
+                    const field = SPAIN_FIELDS.find(f => f.id === p.field_id)
+                    if (!field) return null
+                    const official = spainResults.find(r => r.field_id === p.field_id)?.value
+                    const correct = official && p.value.trim().toLowerCase() === official.trim().toLowerCase()
                     return (
-                      <div key={m.id} className="bg-surface-2 border border-border rounded-lg px-2.5 py-2">
-                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-xs">
-                          <div className="flex items-center gap-1.5">
-                            <Flag team={displayHome} size="sm" />
-                            <span className="truncate">{displayHome}</span>
-                          </div>
-                          <div className="flex flex-col items-center gap-0.5">
-                            {result && (
-                              <span className="font-black text-sm text-gold">{result.home_score}–{result.away_score}</span>
-                            )}
-                            <span className="font-bold text-muted">{pred.home_score}–{pred.away_score}</span>
-                            {pts !== null && (
-                              <span className={cn(
-                                'text-[10px] font-bold px-1.5 rounded-full',
-                                pts === m.pts_exact ? 'bg-green-900 text-green-300' : pts > 0 ? 'bg-amber-900 text-amber-300' : 'bg-red-900 text-red-300'
-                              )}>
-                                {pts}pts
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 flex-row-reverse">
-                            <Flag team={displayAway} size="sm" />
-                            <span className="truncate text-right">{displayAway}</span>
-                          </div>
+                      <div key={p.field_id} className="flex items-center justify-between text-xs py-1.5 border-b border-surface last:border-0">
+                        <span className="text-muted">{field.label}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{p.value}</span>
+                          {official && (
+                            <span className={cn('text-[10px] font-bold px-1.5 rounded-full', correct ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300')}>
+                              {correct ? `+${field.pts}pts` : '✗'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     )
                   })}
                 </div>
-              </div>
-            )
-          })}
-
-          {/* Spain */}
-          {spainPredictions.length > 0 && (
-            <div>
-              <p className="text-[10px] font-bold text-muted uppercase tracking-wide mb-2">🇪🇸 España</p>
-              <div className="space-y-1">
-                {spainPredictions.map(p => {
-                  const field = SPAIN_FIELDS.find(f => f.id === p.field_id)
-                  if (!field) return null
-                  const official = spainResults.find(r => r.field_id === p.field_id)?.value
-                  const correct = official && p.value.trim().toLowerCase() === official.trim().toLowerCase()
-                  return (
-                    <div key={p.field_id} className="flex items-center justify-between text-xs py-1.5 border-b border-surface-2 last:border-0">
-                      <span className="text-muted">{field.label}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{p.value}</span>
-                        {official && (
-                          <span className={cn('text-[10px] font-bold px-1.5 rounded-full', correct ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300')}>
-                            {correct ? `+${field.pts}pts` : '✗'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              )}
             </div>
           )}
 
-          {/* Awards */}
+          {/* Awards section */}
           {awardPredictions.length > 0 && (
-            <div>
-              <p className="text-[10px] font-bold text-muted uppercase tracking-wide mb-2">🏅 Premios</p>
-              <div className="space-y-1">
-                {awardPredictions.map(p => {
-                  const award = AWARDS.find(a => a.id === p.award_id)
-                  if (!award) return null
-                  const official = awardResults.find(r => r.award_id === p.award_id)?.value
-                  const correct = official && p.value.trim().toLowerCase() === official.trim().toLowerCase()
-                  return (
-                    <div key={p.award_id} className="flex items-center justify-between text-xs py-1.5 border-b border-surface-2 last:border-0">
-                      <span className="text-muted">{award.icon} {award.label}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{p.value}</span>
-                        {official && (
-                          <span className={cn('text-[10px] font-bold px-1.5 rounded-full', correct ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300')}>
-                            {correct ? `+${award.pts}pts` : '✗'}
-                          </span>
-                        )}
+            <div className="border border-border rounded-lg overflow-hidden">
+              <button
+                onClick={() => setOpenSection(openSection === 'awards' ? null : 'awards')}
+                className="w-full flex items-center gap-2 px-3 py-2.5 bg-surface-2 hover:bg-surface transition-colors"
+              >
+                <span className="text-xs font-bold flex-1 text-left">🏅 Premios FIFA</span>
+                <span className="text-xs font-bold text-gold">{awardTotal}pts</span>
+                <ChevronDown size={14} className={cn('text-muted transition-transform', openSection === 'awards' && 'rotate-180')} />
+              </button>
+              {openSection === 'awards' && (
+                <div className="p-2 space-y-1">
+                  {awardPredictions.map(p => {
+                    const award = AWARDS.find(a => a.id === p.award_id)
+                    if (!award) return null
+                    const official = awardResults.find(r => r.award_id === p.award_id)?.value
+                    const correct = official && p.value.trim().toLowerCase() === official.trim().toLowerCase()
+                    return (
+                      <div key={p.award_id} className="flex items-center justify-between text-xs py-1.5 border-b border-surface last:border-0">
+                        <span className="text-muted">{award.icon} {award.label}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{p.value}</span>
+                          {official && (
+                            <span className={cn('text-[10px] font-bold px-1.5 rounded-full', correct ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300')}>
+                              {correct ? `+${award.pts}pts` : '✗'}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
