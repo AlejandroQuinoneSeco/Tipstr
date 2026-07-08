@@ -1,138 +1,178 @@
-# ⚽ Tipstr — World Cup 2026 Prediction App
+# Tipstr — World Cup 2026 Prediction App
 
-A full-stack real-time football prediction app built for the FIFA World Cup 2026. Users predict match scores, Spain-specific stats, and FIFA awards across all 104 matches and compete on a live leaderboard.
+> Aplicación de predicciones del Mundial 2026 con sistema de porras multi-grupo, ranking en tiempo real e integración con la API oficial de resultados.
 
-**[🚀 Live Demo](https://tipstr.vercel.app)**
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS |
-| Backend / Auth | Supabase (PostgreSQL + Auth + Realtime) |
-| State Management | Zustand + TanStack Query |
-| Deployment | Vercel |
-| External API | football-data.org |
+**🌐 Live demo:** [mundialtipstr2026.vercel.app](https://tipstrworld2026.vercel.app)
 
 ---
 
-## ✨ Features
+## Descripción
 
-- **Real-time leaderboard** — Points update instantly as results come in via Supabase Realtime
-- **Automatic result sync** — Next.js API route polls football-data.org every 5 minutes and writes to Supabase
-- **Role-based access** — Admin approval flow for new users, admin panel for managing rounds and squads
-- **Progressive round unlock** — Admin opens each knockout round when teams are known
-- **Prediction locking** — Once saved, predictions are locked; users can only view others' picks after locking their own
-- **Spain special section** — Top scorers, group classification, red cards, total goals
-- **FIFA Awards** — Ballon d'Or, Golden Boot, Golden Glove, Best Young Player and more
-- **Scalable scoring** — Higher points for harder-to-predict rounds (3pts groups → 10pts final)
-- **Row Level Security** — All Supabase tables protected with RLS policies
+Tipstr es una aplicación web completa para gestionar porras del Mundial de Fútbol 2026. Los usuarios se registran, crean o se unen a porras mediante código de invitación, y realizan predicciones sobre los 104 partidos oficiales del torneo, así como sobre los premios FIFA y el rendimiento de la selección española.
 
-## 🗄️ Database Schema
+El proyecto nació como reemplazo de una app anterior en Vanilla JS + Firebase, con el objetivo de migrarla a un stack moderno con arquitectura multi-pool, autenticación robusta y sincronización automática de resultados vía API externa.
+
+---
+
+## Stack Tecnológico
+
+| Capa | Tecnología |
+|------|-----------|
+| Frontend | Next.js 16 (App Router), TypeScript strict, Tailwind CSS |
+| Backend | Supabase (PostgreSQL + Auth + Realtime + RLS) |
+| Estado | Zustand, React hooks |
+| Testing | Vitest, @vitest/coverage-v8 |
+| Deploy | Vercel (Hobby) |
+| API externa | football-data.org |
+| Cron | cron-job.org |
+
+---
+
+## Arquitectura
+
+### Multi-pool (Fantasy-style)
+Cualquier usuario puede crear una "porra" y convertirse en su admin, o unirse a una existente mediante código de invitación. Todos los datos (predicciones, resultados, clasificación) están aislados por porra a través de `pool_id`.
 
 ```
-profiles          — User accounts with roles and lock states
-matches           — All 104 official FIFA 2026 matches
-results           — Match scores (manual or API-synced)
-predictions       — User score predictions per match
-award_predictions — User predictions for FIFA awards
-award_results     — Official award results (admin)
-spain_predictions — Spain-specific predictions
-spain_results     — Official Spain results (admin)
-open_phases       — Controls which knockout rounds are open
-spain_squad       — Editable Spain squad for autocomplete
+users
+  └── pool_members (role: admin/member, locked_matches/spain/awards)
+        └── pools (invite_code, require_approval)
+              ├── predictions (por usuario y partido)
+              ├── results (por porra — grupos vía API, eliminatorias manual)
+              ├── pool_match_teams (equipos reales en el bracket)
+              ├── pool_open_phases (qué rondas están abiertas)
+              └── pool_spain_squad (plantilla para autocompletado)
+
+global (compartido entre todas las porras)
+  ├── global_award_results (Premios FIFA — introducidos por platform admin)
+  └── global_spain_results (resultados de España — introducidos por platform admin)
 ```
 
-## 🏗️ Project Structure
+### Row Level Security (RLS)
+Todas las tablas están protegidas con políticas RLS en PostgreSQL. Se implementó una función `is_pool_member()` con `SECURITY DEFINER` para evitar recursión infinita en las políticas de `pool_members`.
+
+### Sincronización de resultados
+- **Fase de grupos**: sincronización automática cada 10 minutos vía cron-job.org → `/api/sync-results` (football-data.org)
+- **Eliminatorias**: introducción manual por el admin de cada porra para evitar marcadores de penaltis
+- El endpoint incluye normalización de nombres de equipos (inglés → español) y detección automática de inversiones local/visitante
+
+---
+
+## Funcionalidades
+
+### Para usuarios
+- Registro e inicio de sesión solo con usuario y contraseña (email derivado internamente)
+- Crear porras o unirse mediante código de invitación
+- Predicciones de los 104 partidos oficiales del Mundial por fases
+- Predicciones de Premios FIFA (Balón de Oro, Bota de Oro, Guante de Oro, etc.)
+- Predicciones sobre España (goleadores, fase, victorias, goles, expulsados)
+- Bloqueo permanente de predicciones antes del inicio del torneo
+- Ver predicciones de otros usuarios (solo tras bloquear las propias)
+- Ranking en tiempo real con desglose por partidos, España y premios
+
+### Para admins de porra
+- Aprobar o rechazar solicitudes de acceso
+- Abrir/cerrar rondas eliminatorias
+- Asignar equipos reales al bracket de eliminatorias
+- Introducir resultados de eliminatorias manualmente (sin penaltis)
+- Gestionar plantilla de España para autocompletado
+
+### Para el admin global (platform admin)
+- Introducir resultados oficiales de Premios FIFA y España (compartidos entre todas las porras)
+
+---
+
+## Sistema de Puntuación
+
+| Fase | Exacto | Ganador |
+|------|--------|---------|
+| Grupos | 3 pts | 1 pt |
+| 32avos / Octavos | 5 pts | 2 pts |
+| Cuartos | 6 pts | 3 pts |
+| Semis / 3er puesto | 8 / 6 pts | 4 / 3 pts |
+| Final | 10 pts | 5 pts |
+
+Premios FIFA y predicciones de España tienen valores específicos por campo (entre 4 y 12 puntos).
+
+---
+
+## Testing
+
+```bash
+npm test                 # Ejecutar todos los tests
+npm run test:coverage    # Tests con informe de cobertura
+```
+
+**36 unit tests** con Vitest cubriendo el sistema de puntuación completo:
+
+```
+lib/scoring/index.ts  |  97.87%  Stmts  |  92.3%  Branch  |  100%  Funcs
+```
+
+Los tests validan todos los escenarios posibles: exacto, ganador, empate, fallo, case-insensitive, acumulación de puntos por fase, edge cases (vacíos, IDs inválidos, sin resultados oficiales).
+
+---
+
+## Migración Firebase → Supabase
+
+El proyecto incluye scripts de migración completa desde la app anterior (YonkiWorld, Vanilla JS + Firebase Realtime Database):
+
+- `migrate.mjs` — migra usuarios, porra, resultados, predicciones, plantilla y fases
+- `fix-joselillo.mjs` — fix para usuarios con caracteres especiales (ñ) en el nombre
+
+La migración preserva las contraseñas originales de los usuarios para que puedan entrar sin cambios con sus mismas credenciales.
+
+---
+
+## Variables de Entorno
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+FOOTBALL_DATA_TOKEN=
+CRON_SECRET=
+```
+
+---
+
+## Estructura del Proyecto
 
 ```
 src/
 ├── app/
-│   ├── (auth)/login/     # Authentication page
-│   ├── (app)/            # Protected app routes
-│   │   ├── partidos/     # Match predictions
-│   │   ├── grupos/       # Group standings
-│   │   ├── espana/       # Spain-specific predictions
-│   │   ├── premios/      # FIFA award predictions
-│   │   ├── ver/          # View others' predictions
-│   │   ├── ranking/      # Live leaderboard
-│   │   └── admin/        # Admin panel
-│   └── api/sync-results/ # API route for football-data.org proxy
+│   ├── (auth)/login/           ← Auth con username + password
+│   ├── pools/                  ← Listado y creación de porras
+│   ├── p/[poolId]/
+│   │   ├── partidos/           ← Predicciones de partidos
+│   │   ├── grupos/             ← Clasificación de grupos
+│   │   ├── espana/             ← Predicciones sobre España
+│   │   ├── premios/            ← Premios FIFA
+│   │   ├── ver/                ← Ver predicciones de otros
+│   │   ├── ranking/            ← Clasificación de la porra
+│   │   └── admin/              ← Panel de administración
+│   ├── admin-global/           ← Resultados oficiales globales
+│   └── api/sync-results/       ← Endpoint de sincronización (cron)
 ├── components/
-│   ├── ui/               # Reusable UI components (Flag, inputs)
-│   ├── matches/          # Match card and list components
-│   ├── ranking/          # Leaderboard table
-│   ├── admin/            # Admin panel components
-│   └── layout/           # AppShell with navigation
 ├── lib/
-│   ├── supabase/         # Client and server Supabase instances
-│   ├── scoring/          # Pure scoring functions
-│   └── data/             # Match data and constants
-├── store/                # Zustand auth store
-└── types/                # TypeScript interfaces
+│   ├── scoring/                ← Lógica de puntuación (testeada)
+│   ├── data/matches.ts         ← 104 partidos, premios, campos España
+│   └── supabase/               ← Clientes server/client
+└── types/
 ```
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 18+
-- A [Supabase](https://supabase.com) project
-- A [football-data.org](https://football-data.org) free API token
-
-### Setup
-
-```bash
-# Clone
-git clone https://github.com/AlejandroQuinoneSeco/tipstr
-cd tipstr
-
-# Install dependencies
-npm install
-
-# Set environment variables
-cp .env.example .env.local
-# Fill in your Supabase URL, anon key, and football-data token
-
-# Run database migrations
-# Copy contents of supabase/migrations/001_initial_schema.sql
-# and run in Supabase SQL Editor
-
-# Run matches seeder (see below)
-# Start dev server
-npm run dev
-```
-
-### Seed matches
-
-After running the migration, seed the 104 official matches by running the seed script in Supabase SQL Editor or via the admin panel.
-
-## 📊 Scoring System
-
-| Event | Points |
-|-------|--------|
-| Exact score (groups) | 3 pts |
-| Correct winner (groups) | 1 pt |
-| Exact score (Round of 32 / Last 16) | 5 pts |
-| Correct winner (Round of 32 / Last 16) | 2 pts |
-| Exact score (Quarter-finals) | 6 pts |
-| Correct winner (Quarter-finals) | 3 pts |
-| Exact score (Semi-finals) | 8 pts |
-| Correct winner (Semi-finals) | 4 pts |
-| Exact score (Final) | 10 pts |
-| Correct winner (Final) | 5 pts |
-| FIFA Champion | 12 pts |
-| Ballon d'Or / Golden Boot | 10 pts each |
-| Golden Glove / Best Young / Best Coach | 8 pts each |
-| Spain top scorer | 10 pts |
-
-## 📝 License
-
-MIT — feel free to fork and adapt for your own tournament predictions.
 
 ---
 
-Built by [Alejandro Quiñones Seco](https://linkedin.com/in/alejandro-quinones-seco)
+## Decisiones técnicas destacadas
+
+- **Auth sin email visible**: los usuarios solo ven username + password. El email se deriva internamente (`username@users.tipstr.app`) con normalización de tildes y ñ para cumplir con Supabase Auth.
+- **Resultados globales vs por porra**: los resultados de Premios FIFA y España son globales (un solo admin los introduce para todas las porras), mientras que los resultados de partidos son por porra para permitir flexibilidad.
+- **Sync solo en grupos**: la API de football-data.org devuelve el marcador de penaltis como resultado final en eliminatorias, lo que daría puntos incorrectos. Los resultados de eliminatorias los introduce el admin manualmente.
+- **RLS con security definer**: se evita la recursión infinita en políticas RLS usando una función `is_pool_member()` con `SECURITY DEFINER` que omite las verificaciones de RLS en la tabla `pool_members`.
+
+---
+
+## Autor
+
+**Alejandro Quiñones** — Full Stack Developer  
+[LinkedIn](https://linkedin.com/in/alejandroquiñonesseco) · [GitHub](https://github.com/AlejandroQuinoneSeco)
